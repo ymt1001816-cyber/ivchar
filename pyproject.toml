@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 visa = ["pyvisa>=1.13"]          # real instruments (Keysight B1500A / generic SMU)
-llm = ["anthropic>=0.40"]        # optional AI anomaly summary in the report
+llm = ["anthropic>=2.0"]        # optional AI anomaly summary in the report
 dev = ["pytest>=7.4"]
 
 [project.scripts]
