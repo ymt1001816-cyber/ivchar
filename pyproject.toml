@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ivchar"
+version = "0.1.0"
+description = "Automated MOSFET/FinFET I-V characterization: instrument abstraction, parameter extraction, batch statistics and reporting."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "MeiYu (Cindy) Kuo" }]
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+visa = ["pyvisa>=1.13"]          # real instruments (Keysight B1500A / generic SMU)
+llm = ["anthropic>=0.40"]        # optional AI anomaly summary in the report
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+ivchar = "ivchar.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
