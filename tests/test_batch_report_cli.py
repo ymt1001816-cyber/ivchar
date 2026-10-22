@@ -128,3 +128,18 @@ def test_cli_measure_and_analyze_roundtrip(tmp_path):
                  "--spec", "planar", "--out", str(out)]) == 0
     params = pd.read_csv(out / "params.csv")
     assert len(params) == 1 and 0.2 < params.vth_cc_sat.iloc[0] < 0.4
+
+
+def test_cli_measure_discrete_recipe(tmp_path):
+    csv = tmp_path / "d.csv"
+    assert main(["measure", "--device", "discrete", "--vdd", "3", "--vg-max", "4", "--vd-lin", "0.1",
+                 "--vd-sat", "2", "--vd-max", "3", "--vg-out", "2.5", "3", "--step", "0.05",
+                 "--id-max", "0.1", "--ig-max", "1e-5", "--i-crit", "1e-3", "--label", "Q1",
+                 "--out", str(csv)]) == 0
+    df = pd.read_csv(csv)
+    assert set(df.die) == {"Q1"} and df.compliance.any()
+
+
+def test_cli_scpi_backend_requires_both_resources(capsys):
+    assert main(["measure", "--backend", "scpi", "--gate-resource", "GPIB0::24::INSTR"]) == 2
+    assert "--drain-resource" in capsys.readouterr().err

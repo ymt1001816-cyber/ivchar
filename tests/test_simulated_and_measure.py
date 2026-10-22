@@ -73,3 +73,19 @@ def test_force_current_hits_voltage_compliance():
     smu.force_current(2, 1e-3, 1.5)
     v = smu.measure_voltage(2)
     assert v.in_compliance and v.value == pytest.approx(1.5)
+
+
+def test_grounded_source_and_custom_recipe():
+    """Discrete-part setup: only gate and drain on SMUs, separate Vg/Vd ranges."""
+    from ivchar.measure import Terminals
+
+    dev = make_device("discrete")
+    smu = SimulatedSMU(dev, terminals={"gate": 1, "drain": 2}, noise_floor=0.0, gain_error=0.0)
+    df = standard_sweeps(smu, vdd=3.0, vd_lin=0.1, step=0.05, vg_max=4.0, vd_sat=2.0, vd_max=3.0,
+                         vg_out=[2.5, 3.0], terminals=Terminals(gate=1, drain=2, source=None, body=None),
+                         compliance=Compliance(gate=1e-5, drain=0.1))
+    tr = df[df.sweep == "idvg"]
+    assert tr.vg.max() == pytest.approx(4.0) and set(tr.vd) == {0.1, 2.0}
+    assert df[df.sweep == "idvd"].vd.max() == pytest.approx(3.0)
+    assert df.isrc.isna().all()  # no SMU on the source
+    assert df.compliance.any()  # 4 V gate drive exceeds the 100 mA drain limit

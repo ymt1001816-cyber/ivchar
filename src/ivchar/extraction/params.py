@@ -110,11 +110,14 @@ def _value_at(x, y, x0: float) -> float:
 
 
 def extract(curves: pd.DataFrame, w: float, l: float, vdd: float,
-            i_norm: float = 100e-9, i_min: float = 1e-12) -> dict:
+            i_norm: float = 100e-9, i_min: float = 1e-12, i_crit: float | None = None) -> dict:
     """Extract the standard parameter set from one device's Id-Vg curves.
 
     ``curves`` uses the long format from :mod:`ivchar.measure`; the lowest Vd of
-    the Id-Vg sweeps is taken as Vd_lin and the highest as Vd_sat.
+    the Id-Vg sweeps is taken as Vd_lin and the highest as Vd_sat. The CC
+    threshold current is ``i_norm * W/L`` unless ``i_crit`` (A) is given, which
+    suits discrete parts whose W/L is unknown (e.g. 1 mA, the datasheet
+    condition for a 2N7000).
     """
     tr = curves[(curves["sweep"] == "idvg") & ~curves["compliance"].astype(bool)]
     vds = np.sort(tr["vd"].unique())
@@ -123,16 +126,18 @@ def extract(curves: pd.DataFrame, w: float, l: float, vdd: float,
     vd_lin, vd_sat = float(vds[0]), float(vds[-1])
     lin = tr[tr["vd"] == vd_lin].sort_values("vg")
     sat = tr[tr["vd"] == vd_sat].sort_values("vg")
-    i_crit = i_norm * w / l
-
-    vth_lin = vth_constant_current(lin["vg"], lin["id"], w, l, i_norm)
-    vth_sat = vth_constant_current(sat["vg"], sat["id"], w, l, i_norm)
+    if i_crit is None:
+        i_crit = i_norm * w / l
+    # vth_constant_current scales its current by W/L; pass W/L = 1 with i_crit.
+    vth_lin = vth_constant_current(lin["vg"], lin["id"], 1.0, 1.0, i_crit)
+    vth_sat = vth_constant_current(sat["vg"], sat["id"], 1.0, 1.0, i_crit)
     vth_gm, gm_lin = vth_max_gm(lin["vg"], lin["id"], vd_lin)
     gm_sat = float(np.nanmax(transconductance(sat["vg"], sat["id"]))) if len(sat) > 2 else np.nan
     ion = _value_at(sat["vg"], sat["id"], vdd)
     ioff = _value_at(sat["vg"], sat["id"], 0.0)
 
     return {
+        "i_crit": i_crit,
         "vd_lin": vd_lin,
         "vd_sat": vd_sat,
         "vth_cc_lin": vth_lin,

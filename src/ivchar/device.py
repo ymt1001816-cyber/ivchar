@@ -72,6 +72,13 @@ PRESETS = {
         name="finfet", w=368e-9, l=20e-9, tox=1.0e-9, vth0=0.35, n=1.10, mu0=0.012,
         theta=1.2, eta=0.035, lam=0.06, kappa=0.7e-3, g_gate=5e-14, i_junction=5e-16, vdd=0.8,
     ),
+    # Roughly a 2N7000-class small-signal discrete MOSFET (Vth ~2 V, long
+    # channel, thick oxide). Illustrative, not fitted to any datasheet; used to
+    # dry-run the discrete-device measurement recipe on the simulator.
+    "discrete": MOSFETParams(
+        name="discrete", w=0.08, l=10e-6, tox=50e-9, vth0=2.1, n=1.6, mu0=0.05,
+        theta=0.15, eta=0.004, lam=0.01, kappa=3.5e-3, g_gate=1e-12, i_junction=1e-11, vdd=5.0,
+    ),
 }
 
 

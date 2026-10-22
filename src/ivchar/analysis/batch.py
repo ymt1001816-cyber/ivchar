@@ -138,7 +138,8 @@ def normalize_curves(curves: pd.DataFrame) -> pd.DataFrame:
     return curves
 
 
-def extract_from_curves(curves: pd.DataFrame, w: float, l: float, vdd: float) -> pd.DataFrame:
+def extract_from_curves(curves: pd.DataFrame, w: float, l: float, vdd: float,
+                        i_crit: float | None = None) -> pd.DataFrame:
     """Extract parameters for every device in a long-format curve table.
 
     Devices are identified by the columns corner/die/temp_c (missing columns are
@@ -149,7 +150,8 @@ def extract_from_curves(curves: pd.DataFrame, w: float, l: float, vdd: float) ->
     rows = []
     for (corner, die, temp), df in curves.groupby(["corner", "die", "temp_c"], sort=False):
         rows.append({"corner": corner, "die": die, "x": df["x"].iloc[0], "y": df["y"].iloc[0],
-                     "temp_c": float(temp), **extract(df, w, l, vdd), "injected_defect": ""})
+                     "temp_c": float(temp), **extract(df, w, l, vdd, i_crit=i_crit),
+                     "injected_defect": ""})
     return pd.DataFrame(rows)
 
 

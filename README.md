@@ -22,7 +22,7 @@ summary to the report.
 | **Batch analysis** | pandas pipeline over dies × temperatures × corners: grouped statistics (leakage in log10), robust z-score (median/MAD) outlier flags, spec limits and yield per corner. |
 | **Report** | matplotlib figures and a single self-contained HTML file: Id–Vg/Id–Vd, temperature behavior, distributions, Ion–Ioff, wafer map, yield and outlier tables. |
 | **AI summary (optional)** | Sends aggregated statistics and the outlier table (never raw curves) to Claude and adds a short anomaly summary, clearly labeled as AI-generated. |
-| **Quality** | 62 pytest tests: analytic known-answer tests for each extraction method, physics sanity checks, driver command strings against a fake VISA resource, and end-to-end CLI runs. |
+| **Quality** | 72 pytest tests: analytic known-answer tests for each extraction method, physics sanity checks, driver command strings against a fake VISA resource, and end-to-end CLI runs. |
 
 ## Quick start
 
@@ -132,6 +132,55 @@ What the figures show:
   are flagged without an injected defect. One is a −3.8σ Vth draw from the random variation
   (TT D002), and three are marginal (|z| ≈ 3.6–3.8) gm or gate-current flags near the noise floor.
   The report lists the injected ground truth next to the flags so detection can be checked.
+
+## Findings
+
+These come from the simulated batch above and are reproducible with `python examples/findings.py`.
+They are about the **methods**, which is the part that carries over to measured silicon.
+
+**1. "Vth" depends on the definition, and the gap between definitions grows with temperature.**
+On the TT median die at Vd = 50 mV, max-gm extrapolation reads 56 mV above the constant-current
+value at −40 °C, 70 mV above at 25 °C and 86 mV above at 125 °C. The CC criterion (100 nA·W/L)
+sits in weak-to-moderate inversion, while the max-gm tangent is taken in strong inversion. The
+distance between those two regimes scales with n·kT/q, so it grows with T. A Vth reported without
+its method and bias is not comparable across labs or datasheets.
+
+**2. Different methods give different Vth temperature coefficients.** The simulator's built-in
+physical shift is −0.90 mV/K. Max-gm LE recovers −0.95 mV/K, but CC reports −1.13 mV/K (linear)
+and −1.23 mV/K (saturation), 25–35 % too steep. A fixed current criterion in the subthreshold
+region also picks up the temperature dependence of the diffusion current itself. For Vth(T)
+studies, use LE, or state the CC current explicitly.
+
+**3. Subthreshold swing follows n·kT/q·ln10 until leakage gets in the way.** Extracted SS is
+62.4 / 80.0 / 110.4 mV/dec at −40 / 25 / 125 °C, against theory values of 62.5 / 79.9 / 106.7.
+The +3.7 mV/dec at 125 °C is not an extraction error. Rerunning the same device with junction and
+gate leakage switched off gives 106.8 mV/dec. At high temperature the junction leakage floor rises
+by about 10⁵ and flattens the bottom of the curve. So the SS fit window has to start well above
+the leakage floor, which is why ivchar fits only below the CC current and above a noise floor.
+
+**4. There is a zero-temperature-coefficient (ZTC) bias point.** On the TT median die at
+Vd = Vdd, the −40 °C and 125 °C transfer curves cross at Vg ≈ 0.69 V (Id ≈ 207 µA). There, Id
+changes by only +1 % over 165 K, compared with +213 % at Vg = 0.5 V and −35 % at Vg = Vdd. Below
+ZTC, the falling Vth dominates and current rises with T. Above it, falling mobility dominates and
+current drops. Biasing near ZTC is a standard way to get temperature-stable references. It also
+means Ion is a worst case at hot and Ioff a worst case at hot, so both corners have to be measured.
+
+**5. Robust outlier flags catch real defects but also flag statistical tails.** Both injected
+defects were flagged, along with four other dies: a 3.8σ draw from the normal variation, and
+three marginal flags near the instrument noise floor. In production you would confirm a flag with
+a second criterion (spec failure, or a flag at more than one temperature) before scrapping a die.
+
+## Measured data and BSIM reference curves
+
+- **Measured devices.** [docs/MEASUREMENT_PLAN.md](docs/MEASUREMENT_PLAN.md) is a complete plan
+  for measuring 2N7000 discrete MOSFETs with two SCPI SMUs (`ivchar measure --backend scpi`):
+  limits, wiring, recipe, sanity checks and record keeping. The recipe has been dry-run on the
+  simulator's `discrete` preset. Measured results will be added under `data/measured/` and
+  labeled as measured.
+- **BSIM reference.** `ivchar spice netlist` writes a Cadence Spectre netlist with the same sweeps
+  for a PDK transistor and also saves the model's internal `vth`. `ivchar spice import` converts
+  the PSF-ASCII results back into a curves CSV for `ivchar analyze`. This lets the extraction be
+  checked against an industry compact model as well as the built-in one.
 
 ## Hardware notes
 

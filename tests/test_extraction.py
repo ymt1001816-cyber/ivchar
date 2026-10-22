@@ -93,3 +93,13 @@ def test_extract_needs_two_drain_biases():
                        "ig": 0.0, "compliance": False})
     with pytest.raises(ValueError):
         extract(df, 1e-6, 1e-7, 1.0)
+
+
+def test_fixed_cc_current_for_discrete_parts():
+    vg = np.linspace(0, 4, 401)
+    id_ = 1e-3 * 10 ** ((vg - 2.1) / 0.1)
+    df = pd.DataFrame({"sweep": "idvg", "vg": np.r_[vg, vg], "vd": np.r_[[0.1] * 401, [2.0] * 401],
+                       "id": np.r_[id_, id_], "ig": 0.0, "compliance": False})
+    r = extract(df, w=1.0, l=1.0, vdd=3.0, i_crit=1e-3)
+    assert r["vth_cc_sat"] == pytest.approx(2.1, abs=1e-6)
+    assert r["i_crit"] == 1e-3

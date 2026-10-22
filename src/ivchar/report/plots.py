@@ -81,23 +81,44 @@ def _median_die(params: pd.DataFrame, corner: str, temp: float) -> str:
 
 
 def _curve(curves, corner, die, temp, sweep):
+    """One device's sweep, without points taken in compliance (instrument limit, not data)."""
     return curves[(curves.corner == corner) & (curves.die == die) & np.isclose(curves.temp_c, temp)
-                  & (curves.sweep == sweep)]
+                  & (curves.sweep == sweep) & ~curves["compliance"].astype(bool)]
+
+
+def _current_unit(curves) -> tuple[float, str]:
+    """Scale and label for linear current axes: mA for power devices, µA otherwise."""
+    peak = curves.loc[~curves["compliance"].astype(bool), "id"].abs().max()
+    return (1e3, "mA") if peak > 2e-3 else (1e6, "µA")
+
+
+def _legend(ax, **kw):
+    """A legend only when there is more than one series."""
+    if len(ax.get_legend_handles_labels()[1]) > 1:
+        ax.legend(**kw)
+
+
+def _compliance_note(ax, curves):
+    if curves["compliance"].astype(bool).any():
+        ax.text(0.02, 0.98, "points in compliance omitted", transform=ax.transAxes, ha="left",
+                va="top", fontsize=7, color=TEXT_2)
 
 
 def plot_idvg_corners(curves, params, temp, out: Path, simulated=True) -> Path:
     """Transfer curves of the median die per corner, log and linear panels."""
     fig, (ax_log, ax_lin) = plt.subplots(1, 2, figsize=(9, 3.6))
+    scale, unit = _current_unit(curves)
     vd_sat = curves.loc[curves.sweep == "idvg", "vd"].max()
     for corner in _corners(params):
         die = _median_die(params, corner, temp)
         d = _curve(curves, corner, die, temp, "idvg")
         d = d[np.isclose(d.vd, vd_sat)].sort_values("vg")
         ax_log.semilogy(d.vg, np.clip(d.id, 1e-15, None), color=_color(corner, params), label=corner)
-        ax_lin.plot(d.vg, d.id * 1e6, color=_color(corner, params), label=corner)
+        ax_lin.plot(d.vg, d.id * scale, color=_color(corner, params), label=corner)
     ax_log.set(title=f"Id-Vg, Vd = {vd_sat:g} V, {temp:g} °C (log)", xlabel="Vg (V)", ylabel="Id (A)")
-    ax_lin.set(title="Id-Vg (linear)", xlabel="Vg (V)", ylabel="Id (µA)")
-    ax_lin.legend(title="corner", loc="upper left")
+    ax_lin.set(title="Id-Vg (linear)", xlabel="Vg (V)", ylabel=f"Id ({unit})")
+    _legend(ax_lin, title="corner", loc="upper left", bbox_to_anchor=(0, 0.93))
+    _compliance_note(ax_lin, curves)
     _sim_note(fig, simulated)
     return _save(fig, out)
 
@@ -105,6 +126,7 @@ def plot_idvg_corners(curves, params, temp, out: Path, simulated=True) -> Path:
 def plot_idvg_temperature(curves, params, corner, out: Path, simulated=True) -> Path:
     """One die across temperature: Ioff rises, SS degrades, Ion drops."""
     fig, (ax_log, ax_lin) = plt.subplots(1, 2, figsize=(9, 3.6))
+    scale, unit = _current_unit(curves)
     temps = sorted(params.temp_c.unique())
     colors = _temp_colors(temps)
     die = _median_die(params, corner, 25.0 if 25.0 in temps else temps[len(temps) // 2])
@@ -113,26 +135,29 @@ def plot_idvg_temperature(curves, params, corner, out: Path, simulated=True) -> 
         d = _curve(curves, corner, die, t, "idvg")
         d = d[np.isclose(d.vd, vd_sat)].sort_values("vg")
         ax_log.semilogy(d.vg, np.clip(d.id, 1e-15, None), color=colors[t], label=f"{t:g} °C")
-        ax_lin.plot(d.vg, d.id * 1e6, color=colors[t], label=f"{t:g} °C")
+        ax_lin.plot(d.vg, d.id * scale, color=colors[t], label=f"{t:g} °C")
     ax_log.set(title=f"Id-Vg vs temperature, {corner} {die} (log)", xlabel="Vg (V)", ylabel="Id (A)")
-    ax_lin.set(title="Id-Vg vs temperature (linear)", xlabel="Vg (V)", ylabel="Id (µA)")
-    ax_lin.legend(loc="upper left")
+    ax_lin.set(title="Id-Vg vs temperature (linear)", xlabel="Vg (V)", ylabel=f"Id ({unit})")
+    _legend(ax_lin, loc="upper left", bbox_to_anchor=(0, 0.93))
+    _compliance_note(ax_lin, curves)
     _sim_note(fig, simulated)
     return _save(fig, out)
 
 
 def plot_idvd(curves, params, corner, temp, out: Path, simulated=True) -> Path:
     fig, ax = plt.subplots(figsize=(4.8, 3.6))
+    scale, unit = _current_unit(curves)
     die = _median_die(params, corner, temp)
     d = _curve(curves, corner, die, temp, "idvd")
     vgs = sorted(d.vg.unique())
     ramp = _temp_colors(vgs)  # ordered family -> same sequential ramp
     for vg in vgs:
         s = d[np.isclose(d.vg, vg)].sort_values("vd")
-        ax.plot(s.vd, s.id * 1e6, color=ramp[vg])
-        ax.annotate(f"Vg={vg:g} V", (s.vd.iloc[-1], s.id.iloc[-1] * 1e6), xytext=(4, 0),
+        ax.plot(s.vd, s.id * scale, color=ramp[vg])
+        ax.annotate(f"Vg={vg:g} V", (s.vd.iloc[-1], s.id.iloc[-1] * scale), xytext=(4, 0),
                     textcoords="offset points", va="center", fontsize=7, color=TEXT_2)
-    ax.set(title=f"Id-Vd, {corner} {die}, {temp:g} °C", xlabel="Vd (V)", ylabel="Id (µA)")
+    ax.set(title=f"Id-Vd, {corner} {die}, {temp:g} °C", xlabel="Vd (V)", ylabel=f"Id ({unit})")
+    _compliance_note(ax, curves)
     ax.set_xlim(right=d.vd.max() * 1.25)
     _sim_note(fig, simulated)
     return _save(fig, out)
@@ -174,7 +199,7 @@ def plot_param_vs_temp(params, col, label, out: Path, scale=1.0, simulated=True)
         ax.errorbar(m.index, m.values, yerr=s.values, color=_color(corner, params), marker="o",
                     markersize=5, markeredgecolor=SURFACE, capsize=3, label=corner)
     ax.set(title=f"{label} vs temperature (median ± 1σ)", xlabel="Temperature (°C)", ylabel=label)
-    ax.legend(title="corner")
+    _legend(ax, title="corner")
     _sim_note(fig, simulated)
     return _save(fig, out)
 
