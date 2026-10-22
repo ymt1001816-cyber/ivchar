@@ -122,6 +122,15 @@ class SMU(ABC):
         for ch in self.channels:
             self.output_off(ch)
 
+    def hold(self, seconds: float) -> None:
+        """Keep the present biases for ``seconds`` (stress intervals, settling).
+
+        Real instruments simply wait; the simulator advances a virtual clock so
+        that time-dependent effects such as BTI evolve without real waiting.
+        """
+        if seconds > 0:
+            time.sleep(seconds)
+
     # --- sweeps -----------------------------------------------------------
 
     def voltage_sweep(
@@ -150,8 +159,7 @@ class SMU(ABC):
 
         for k, v in enumerate(forced):
             self.force_voltage(channel, v, compliance)
-            if settle_time > 0:
-                time.sleep(settle_time)
+            self.hold(settle_time)
             for ch in measure_channels:
                 reading = self.measure_current(ch)
                 currents[ch][k] = reading.value

@@ -7,6 +7,11 @@ Measurement non-idealities modelled:
   * Gaussian noise: sqrt(floor^2 + (gain_error * I)^2), floor ~ 10 fA
   * compliance: a terminal current beyond the limit is clamped and flagged
     (simplification: the other terminal voltages are not re-solved)
+
+Time: the SMU keeps a virtual clock. Each bias step takes ``point_time``
+seconds and :meth:`hold` advances the clock without real waiting, so a device
+with an aging model (BTI) degrades under stress and recovers between
+measurements exactly as the bias history dictates.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ class SimulatedSMU(SMU):
         noise_floor: float = 10e-15,
         gain_error: float = 2e-3,
         seed: int | None = 0,
+        point_time: float = 0.0,
     ):
         super().__init__("simulated-smu")
         self.device = device or make_device()
@@ -37,6 +43,8 @@ class SimulatedSMU(SMU):
         self.noise_floor = noise_floor
         self.gain_error = gain_error
         self.rng = np.random.default_rng(seed)
+        self.point_time = point_time  # seconds each bias step lasts (virtual clock)
+        self.clock = 0.0
         self._state: dict[int, tuple[SourceMode, float, float]] = {}
 
     def connect(self) -> None:
@@ -53,15 +61,30 @@ class SimulatedSMU(SMU):
         self._check_channel(channel)
         self._check_compliance(compliance)
         self._state[channel] = (SourceMode.VOLTAGE, float(voltage), compliance)
+        self._advance(self.point_time)
 
     def force_current(self, channel, current, compliance):
         self._check_channel(channel)
         self._check_compliance(compliance)
         self._state[channel] = (SourceMode.CURRENT, float(current), compliance)
+        self._advance(self.point_time)
 
     def output_off(self, channel):
         self._check_channel(channel)
         self._state.pop(channel, None)
+
+    def hold(self, seconds: float) -> None:
+        self._advance(seconds)
+
+    def _advance(self, dt: float) -> None:
+        """Advance the virtual clock; evolve the device's aging state at present bias."""
+        if dt <= 0:
+            return
+        self.clock += dt
+        aging = self.device.aging
+        if aging is not None:
+            v = self._voltages()
+            aging.advance(dt, v.get("gate", 0.0) - v.get("source", 0.0), self.device.temp_k)
 
     # --- device solution --------------------------------------------------
 
@@ -129,7 +152,8 @@ class SimulatedSMU(SMU):
         Same physics as stepping point by point, the way a hardware sweep on a
         real analyzer is faster than software-timed spot measurements.
         """
-        if any(mode is SourceMode.CURRENT for mode, _, _ in self._state.values()):
+        if self.device.aging is not None or any(mode is SourceMode.CURRENT for mode, _, _ in self._state.values()):
+            # Bias history matters (aging) or a current-forced node must be solved: step point by point.
             return super().voltage_sweep(channel, voltages, compliance, measure_channels, settle_time)
         self._check_channel(channel)
         self._check_compliance(compliance)

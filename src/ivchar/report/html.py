@@ -13,14 +13,7 @@ from jinja2 import Template
 from ivchar import __version__
 from ivchar.analysis.batch import Analysis
 
-TEMPLATE = Template("""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>I-V Characterization Report</title>
-<style>
-:root { --bg:#fcfcfb; --card:#ffffff; --text:#0b0b0b; --text2:#52514e; --line:#e4e3df;
+CSS = """:root { --bg:#fcfcfb; --card:#ffffff; --text:#0b0b0b; --text2:#52514e; --line:#e4e3df;
         --warn-bg:#fff4e0; --warn:#8a5a00; --bad:#d03b3b; --good:#0b7a0b; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --bg:#1a1a19; --card:#232322; --text:#f0efec; --text2:#c3c2b7;
@@ -49,7 +42,16 @@ td:first-child, th:first-child { text-align: left; }
 .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 150px; }
 .kpi b { display: block; font-size: 22px; } .kpi span { color: var(--text2); font-size: 12px; }
 .fail { color: var(--bad); font-weight: 600; } .pass { color: var(--good); font-weight: 600; }
-</style>
+"""
+
+TEMPLATE = Template("""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I-V Characterization Report</title>
+<style>
+{{ css }}</style>
 </head>
 <body><main>
 <h1>I-V Characterization Report</h1>
@@ -153,6 +155,7 @@ def render(analysis: Analysis, figures: dict[str, Path], out_path: Path, simulat
     summary = analysis.summary.xs("median", axis=1, level=1) if len(analysis.summary) else analysis.summary
 
     html = TEMPLATE.render(
+        css=CSS,
         simulated=simulated,
         meta={"device": device, "n_devices": len(p), "version": __version__,
               "generated": dt.datetime.now().strftime("%Y-%m-%d %H:%M")},

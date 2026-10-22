@@ -23,7 +23,8 @@ summary to the report.
 | **Report** | matplotlib figures and a single self-contained HTML file: Id–Vg/Id–Vd, temperature behavior, distributions, Ion–Ioff, wafer map, yield and outlier tables. |
 | **AI summary (optional)** | Sends aggregated statistics and the outlier table (never raw curves) to Claude and adds a short anomaly summary, clearly labeled as AI-generated. |
 | **BSIM validation** | `ivchar spice` writes Spectre netlists and imports the results. Extraction was checked against Cadence gpdk045 BSIM4 models across 3 corners × 3 temperatures, and tracks corner Vth shifts within 3 mV. |
-| **Quality** | 72 pytest tests: analytic known-answer tests for each extraction method, physics sanity checks, driver command strings against a fake VISA resource, and end-to-end CLI runs. |
+| **Reliability (BTI)** | Measure-stress-measure with spot or full-sweep sensing, recovery, forward/reverse hysteresis and power-law lifetime projection, on any SMU. The simulator has a defect-based BTI model (recoverable traps with a wide spread of capture and emission times, plus a permanent component) and a virtual clock, so stress and recovery run in milliseconds. |
+| **Quality** | 83 pytest tests: analytic known-answer tests for each extraction method, physics sanity checks, driver command strings against a fake VISA resource, and end-to-end CLI runs. |
 
 ## Quick start
 
@@ -53,6 +54,9 @@ ivchar measure --backend b1500 --resource GPIB0::17::INSTR --w 1e-6 --l 1e-7 --v
 # Analyze curves from elsewhere (measured, SPICE or TCAD) with the same pipeline
 ivchar analyze dut.csv --w 1e-6 --l 1e-7 --vdd 1.0 --spec planar --no-simulated --out dut_report
 
+# Simulated BTI reliability study: stress-measure-stress, recovery, lifetime, hysteresis
+ivchar reliability --temp 125 --stress-vg 1.6 1.8 2.0 --use-vg 1.0 --out out_reliability
+
 # Add the AI anomaly summary (needs: pip install "ivchar[llm]" and ANTHROPIC_API_KEY)
 ivchar run --llm
 ```
@@ -80,14 +84,16 @@ print(extract(curves, w=1e-6, l=100e-9, vdd=1.0))
 src/ivchar/
 ├── instruments/
 │   ├── base.py        SMU abstract class, Reading (value + compliance flag), staircase sweep
-│   ├── simulated.py   SimulatedSMU: compact model + noise + compliance
+│   ├── simulated.py   SimulatedSMU: compact model + noise + compliance + virtual clock
 │   └── visa.py        B1500A, GenericSCPISMU, MultiSMU (PyVISA)
 ├── device.py          compact model, presets, process corners
 ├── measure.py         id_vg, id_vd, standard_sweeps -> long-format DataFrame
+├── reliability.py     BTI model, measure-stress-measure, hysteresis, lifetime projection
+├── spice.py           Spectre netlist writer and PSF-ASCII importer
 ├── extraction/        Vth (CC, max-gm), SS, gm, Ion/Ioff, DIBL
 ├── analysis/          batch runner, statistics, outliers, spec/yield
-├── report/            figures, HTML report, optional LLM summary
-└── cli.py             ivchar run | measure | analyze
+├── report/            figures, HTML reports (characterization, reliability), LLM summary
+└── cli.py             ivchar run | measure | analyze | reliability | spice
 ```
 
 Measurement and analysis code depends only on the `SMU` interface, so the same sweep routines run
@@ -213,6 +219,48 @@ What this shows:
 - **SS follows kT/q.** Extracted SS is 61.8 / 78.0 / 103.6 mV/dec at −40 / 25 / 125 °C. That is
   SS/T ≈ 0.26 mV/dec/K at every temperature, which means n ≈ 1.31 constant. The model physics
   passes through the extraction intact.
+
+## Reliability: BTI and hysteresis (simulated)
+
+`ivchar reliability` runs the measure-stress-measure (MSM) flow used in reliability labs. The gate
+is held at a stress voltage with drain, source and body grounded. The stress is interrupted at
+log-spaced times to read ΔVth, the device is then left to recover, and the results are
+extrapolated to a lifetime. The routines in `ivchar.reliability` only use the SMU interface,
+so the same flow runs on an instrument. The numbers below come from the simulator's BTI model
+(planar NMOS, 125 °C, stress at 1.6 / 1.8 / 2.0 V, use voltage 1.0 V, failure at ΔVth = 30 mV)
+and describe the **method**, not a technology.
+
+| | |
+|---|---|
+| ![ΔVth vs time](docs/img/bti_dvth_vs_time.png) | ![Measurement delay](docs/img/bti_measurement_delay.png) |
+| ![Recovery](docs/img/bti_recovery.png) | ![Lifetime projection](docs/img/bti_lifetime.png) |
+
+**1. The measurement itself changes the answer.** Same device, same 1.8 V stress, three ways
+to sense:
+
+| Sensing | After 1 s of stress | After 10⁴ s | Power-law exponent n | Projected lifetime at 1.0 V |
+|---|---|---|---|---|
+| spot Id, 1 ms after stress | 22.7 mV | 50.2 mV | 0.085 | 322 years |
+| spot Id, 1 s after stress | 13.3 mV | 41.1 mV | 0.120 | 16 years |
+| full Id-Vg sweep, 1 ms after stress | 18.5 mV | 47.2 mV | 0.100 | 65 years |
+
+BTI starts recovering the moment the stress is removed. A 1 s delay loses 41 % of the 1 s reading
+but only 18 % of the 10⁴ s reading. That makes the curve look steeper, so the fitted n goes up
+and the extrapolated lifetime changes by 20×. A full sweep partly recovers and partly re-stresses
+the device while it measures. This is why reliability labs use fast, on-the-fly or spot sensing,
+and why a published n or lifetime is meaningless without the measurement delay.
+
+**2. Much of the shift is recoverable.** After 10⁴ s at 1.8 V, 40 % of ΔVth relaxes within
+1000 s at 0 V. The rest is the permanent component (interface states). That component also
+raises SS, from 110.4 to 112.3 mV/dec here, which a full sweep can detect and a spot reading
+cannot.
+
+**3. Hysteresis depends on sweep speed.** On the same model, a forward/reverse Id-Vg sweep to
+1.8 V shows 8.0 mV of hysteresis at 1 µs per point and 12.9 mV at 1 s per point. A slower sweep
+gives more defects time to capture charge on the way up. Hysteresis numbers are only comparable
+at the same sweep rate.
+
+![Hysteresis](docs/img/hysteresis.png)
 
 ## Measured data
 

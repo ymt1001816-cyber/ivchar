@@ -4,6 +4,7 @@
     ivchar measure   one device on the simulator or a real instrument -> curves CSV
     ivchar analyze   extraction + report from curve CSVs (measured, SPICE or TCAD data)
     ivchar spice     Spectre/BSIM reference sweeps: write a netlist, import the results
+    ivchar reliability  simulated BTI study: stress-measure-stress, recovery, lifetime, hysteresis
 """
 
 from __future__ import annotations
@@ -138,6 +139,30 @@ def cmd_spice_import(args) -> int:
     return 0
 
 
+def cmd_reliability(args) -> int:
+    from ivchar.reliability import StudyConfig, run_study, summarize_study
+    from ivchar.report.reliability import make_figures, render
+
+    cfg = StudyConfig(preset=args.device, temp_c=args.temp, stress_vg=tuple(args.stress_vg),
+                      use_vg=args.use_vg, criterion=args.criterion, point_time=args.point_time)
+    print(f"Simulated BTI study: {cfg.preset}, {cfg.temp_c:g} C, stress Vg {list(cfg.stress_vg)} "
+          "(SIMULATED DATA)", file=sys.stderr)
+    study = run_study(cfg)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    study["msm"].to_csv(out / "msm.csv", index=False)
+    study["hysteresis"].to_csv(out / "hysteresis.csv", index=False)
+    figures = make_figures(study, out / "figures")
+    report = render(study, figures, out / "reliability_report.html")
+    s = summarize_study(study)
+    print(f"ΔVth after {max(cfg.stress_times):g} s at {s['vg_mid']:g} V: "
+          f"{1e3 * s['dvth_end_fast']:.1f} mV; {100 * s['recovered_fraction_1000s']:.0f}% recovers in 1000 s")
+    for label, years in s["ttf_years_by_method"].items():
+        print(f"  projected lifetime ({label}): {years:.3g} years")
+    print(f"Report: {report.resolve()}")
+    return 0
+
+
 def _print_summary(analysis, report: Path) -> None:
     if len(analysis.yields):
         print("\nYield at %g C:" % analysis.spec_temp_c)
@@ -210,6 +235,16 @@ def build_parser() -> argparse.ArgumentParser:
     mea.add_argument("--i-crit", type=float, help="fixed CC threshold current (A)")
     mea.add_argument("--out", default="curves.csv")
     mea.set_defaults(func=cmd_measure)
+
+    rel = sub.add_parser("reliability", help="simulated BTI / hysteresis study + report")
+    rel.add_argument("--device", choices=["planar", "finfet"], default="planar")
+    rel.add_argument("--temp", type=float, default=125.0)
+    rel.add_argument("--stress-vg", type=float, nargs="+", default=[1.6, 1.8, 2.0])
+    rel.add_argument("--use-vg", type=float, default=1.0, help="use voltage for lifetime projection (V)")
+    rel.add_argument("--criterion", type=float, default=0.03, help="failure criterion ΔVth (V)")
+    rel.add_argument("--point-time", type=float, default=1e-3, help="seconds per bias step")
+    rel.add_argument("--out", default="output_reliability")
+    rel.set_defaults(func=cmd_reliability)
 
     sp = sub.add_parser("spice", help="Spectre/BSIM reference sweeps")
     sps = sp.add_subparsers(dest="spice_command", required=True)

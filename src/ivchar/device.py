@@ -109,10 +109,16 @@ def _softplus(x):
 
 @dataclass
 class MOSFET:
-    """A device instance at a given temperature."""
+    """A device instance at a given temperature.
+
+    ``aging`` optionally holds a degradation state (e.g.
+    :class:`ivchar.reliability.BTIModel`) exposing ``delta_vth`` (V) and
+    ``delta_n`` (increase of the subthreshold slope factor from interface traps).
+    """
 
     params: MOSFETParams
     temp_c: float = 25.0
+    aging: object | None = None
 
     @property
     def temp_k(self) -> float:
@@ -127,13 +133,17 @@ class MOSFET:
 
         vds = np.abs(vd - vs)
         vth = p.vth0 - p.kappa * (t - T_REF) - p.eta * vds
+        n = p.n
+        if self.aging is not None:
+            vth = vth + self.aging.delta_vth
+            n = n + self.aging.delta_n
         # Smooth overdrive: ~0 in subthreshold, Vgs - Vth in strong inversion.
         # Referenced to the lower of S/D so the device stays symmetric.
-        vov = 2 * p.n * ut * _softplus((vg - np.minimum(vs, vd) - vth) / (2 * p.n * ut))
+        vov = 2 * n * ut * _softplus((vg - np.minimum(vs, vd) - vth) / (2 * n * ut))
         mu = p.mu0 * (t / T_REF) ** -1.5 / (1 + p.theta * vov)
-        ispec = 2 * p.n * mu * p.cox * (p.w / p.l) * ut**2
+        ispec = 2 * n * mu * p.cox * (p.w / p.l) * ut**2
 
-        vp = (vg - vb - vth) / p.n
+        vp = (vg - vb - vth) / n
         xf = (vp - (vs - vb)) / ut
         xr = (vp - (vd - vb)) / ut
         return ispec * (_softplus(xf / 2) ** 2 - _softplus(xr / 2) ** 2) * (1 + p.lam * vds)
