@@ -134,8 +134,10 @@ def _find(raw_dir: Path, analysis: str) -> str:
 def _frame(sweep, vg, vd, d: dict) -> pd.DataFrame:
     n = len(d.get("vgs", d.get("vds")))
     # Spectre reports a source's current flowing *into* its + terminal, so the
-    # current the drain source delivers to the device is -VD:p.
-    id_ = d["M1:ids"] if "M1:ids" in d else -d["VD:p"]
+    # current the drain source delivers to the device is -VD:p. That terminal
+    # current (channel + junction leakage) is what an SMU would measure; the
+    # model's channel current M1:ids is kept alongside for reference.
+    id_ = -d["VD:p"]
     return pd.DataFrame({
         "sweep": sweep,
         "vg": np.broadcast_to(vg, n).astype(float),
@@ -145,4 +147,5 @@ def _frame(sweep, vg, vd, d: dict) -> pd.DataFrame:
         "isrc": np.nan,
         "compliance": False,
         "bsim_vth": d.get("M1:vth", np.full(n, np.nan)),
+        "bsim_ids": d.get("M1:ids", np.full(n, np.nan)),
     })

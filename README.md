@@ -22,6 +22,7 @@ summary to the report.
 | **Batch analysis** | pandas pipeline over dies × temperatures × corners: grouped statistics (leakage in log10), robust z-score (median/MAD) outlier flags, spec limits and yield per corner. |
 | **Report** | matplotlib figures and a single self-contained HTML file: Id–Vg/Id–Vd, temperature behavior, distributions, Ion–Ioff, wafer map, yield and outlier tables. |
 | **AI summary (optional)** | Sends aggregated statistics and the outlier table (never raw curves) to Claude and adds a short anomaly summary, clearly labeled as AI-generated. |
+| **BSIM validation** | `ivchar spice` writes Spectre netlists and imports the results. Extraction was checked against Cadence gpdk045 BSIM4 models across 3 corners × 3 temperatures, and tracks corner Vth shifts within 3 mV. |
 | **Quality** | 72 pytest tests: analytic known-answer tests for each extraction method, physics sanity checks, driver command strings against a fake VISA resource, and end-to-end CLI runs. |
 
 ## Quick start
@@ -145,11 +146,14 @@ sits in weak-to-moderate inversion, while the max-gm tangent is taken in strong 
 distance between those two regimes scales with n·kT/q, so it grows with T. A Vth reported without
 its method and bias is not comparable across labs or datasheets.
 
-**2. Different methods give different Vth temperature coefficients.** The simulator's built-in
-physical shift is −0.90 mV/K. Max-gm LE recovers −0.95 mV/K, but CC reports −1.13 mV/K (linear)
-and −1.23 mV/K (saturation), 25–35 % too steep. A fixed current criterion in the subthreshold
-region also picks up the temperature dependence of the diffusion current itself. For Vth(T)
-studies, use LE, or state the CC current explicitly.
+**2. Different methods give different Vth temperature coefficients, and which one is "closer"
+depends on the device.** The built-in model's physical shift is −0.90 mV/K. Max-gm LE recovers
+−0.95 mV/K, while CC reports −1.13 mV/K (linear) and −1.23 mV/K (saturation), 25–35 % too steep:
+a fixed current in subthreshold also picks up the temperature dependence of the diffusion current.
+The gpdk045 BSIM models reverse the ranking (see the BSIM validation below): there LE deviates
+more, because temperature-dependent mobility degradation and series resistance move the
+strong-inversion tangent. So an extracted Vth(T) slope is a property of the method as much as of
+the device. Report it with the method, and do not mix methods when comparing.
 
 **3. Subthreshold swing follows n·kT/q·ln10 until leakage gets in the way.** Extracted SS is
 62.4 / 80.0 / 110.4 mV/dec at −40 / 25 / 125 °C, against theory values of 62.5 / 79.9 / 106.7.
@@ -162,25 +166,60 @@ the leakage floor, which is why ivchar fits only below the CC current and above 
 Vd = Vdd, the −40 °C and 125 °C transfer curves cross at Vg ≈ 0.69 V (Id ≈ 207 µA). There, Id
 changes by only +1 % over 165 K, compared with +213 % at Vg = 0.5 V and −35 % at Vg = Vdd. Below
 ZTC, the falling Vth dominates and current rises with T. Above it, falling mobility dominates and
-current drops. Biasing near ZTC is a standard way to get temperature-stable references. It also
-means Ion is a worst case at hot and Ioff a worst case at hot, so both corners have to be measured.
+current drops. Biasing near ZTC is a standard way to get temperature-stable references. For this device both
+worst cases (lowest Ion, highest Ioff) occur at the hot corner, which is why hot testing matters
+for both.
 
 **5. Robust outlier flags catch real defects but also flag statistical tails.** Both injected
 defects were flagged, along with four other dies: a 3.8σ draw from the normal variation, and
 three marginal flags near the instrument noise floor. In production you would confirm a flag with
 a second criterion (spec failure, or a flag at more than one temperature) before scrapping a die.
 
-## Measured data and BSIM reference curves
+## Validation against BSIM (Cadence gpdk045)
 
-- **Measured devices.** [docs/MEASUREMENT_PLAN.md](docs/MEASUREMENT_PLAN.md) is a complete plan
-  for measuring 2N7000 discrete MOSFETs with two SCPI SMUs (`ivchar measure --backend scpi`):
-  limits, wiring, recipe, sanity checks and record keeping. The recipe has been dry-run on the
-  simulator's `discrete` preset. Measured results will be added under `data/measured/` and
-  labeled as measured.
-- **BSIM reference.** `ivchar spice netlist` writes a Cadence Spectre netlist with the same sweeps
-  for a PDK transistor and also saves the model's internal `vth`. `ivchar spice import` converts
-  the PSF-ASCII results back into a curves CSV for `ivchar analyze`. This lets the extraction be
-  checked against an industry compact model as well as the built-in one.
+To check the extraction against an industry compact model as well as the built-in one, the same
+sweeps were run in Cadence Spectre 19.1 on the gpdk045 core NMOS (`g45n1svt`, BSIM4, W = 1 µm,
+L = 45 nm, Vdd = 1.0 V) for the TT, FF and SS model corners at −40, 25 and 125 °C. ivchar then
+extracted parameters from the terminal currents, as it would from measured data, and compared them
+with the model's internal operating-point `vth`. gpdk045 is a generic teaching PDK, not a
+calibrated foundry process, so all of this is **simulated**.
+
+![Extracted Vth vs BSIM vth](docs/bsim/bsim_vth.png)
+
+| at 25 °C | BSIM `vth` (Vd = 50 mV) | CC Vth | max-gm LE Vth | SS | DIBL (CC) | Ion | Ioff |
+|---|---|---|---|---|---|---|---|
+| SS | 656 mV | 549 mV | 606 mV | 76.9 mV/dec | 87 mV/V | 366 µA | 9.7 pA |
+| TT | 607 mV | 499 mV | 559 mV | 78.0 mV/dec | 93 mV/V | 429 µA | 39 pA |
+| FF | 559 mV | 451 mV | 513 mV | 79.5 mV/dec | 101 mV/V | 488 µA | 222 pA |
+
+All nine corner/temperature points are in [docs/bsim/bsim_comparison.csv](docs/bsim/bsim_comparison.csv).
+To reproduce them: `ivchar spice netlist` → Spectre → `python examples/bsim_compare.py <results>`.
+
+What this shows:
+
+- **Corner shifts are tracked within 3 mV.** From TT to SS, BSIM `vth` rises 49.3 mV. CC
+  extraction sees +50.3 mV and LE sees +47.6 mV. From TT to FF: BSIM −48.0 mV, CC −48.0 mV,
+  LE −45.6 mV. This is the number that matters for corner and lot screening.
+- **The absolute level depends on the definition.** CC reads 90–110 mV and LE 35–60 mV below the
+  model's `vth`, depending on temperature. At a given temperature the offset is the same for all
+  three corners within 4 mV. BSIM's `vth` is an internal model
+  quantity. The current near threshold also depends on its subthreshold offset and on the
+  moderate-inversion smoothing, so no terminal measurement reproduces it exactly. This is the same
+  lesson as Finding 1, now seen in an industry model.
+- **Terminal DIBL is 4–6× the change in the model's `vth`** (93 vs 20 mV/V at TT, 25 °C). In
+  BSIM4, part of the drain's effect on the near-threshold current enters through terms other than
+  `vth`, for example drain-dependent subthreshold coupling. What the transistor does at its
+  terminals is what a test program sees, so DIBL has to be defined by the measurement method.
+- **SS follows kT/q.** Extracted SS is 61.8 / 78.0 / 103.6 mV/dec at −40 / 25 / 125 °C. That is
+  SS/T ≈ 0.26 mV/dec/K at every temperature, which means n ≈ 1.31 constant. The model physics
+  passes through the extraction intact.
+
+## Measured data
+
+[docs/MEASUREMENT_PLAN.md](docs/MEASUREMENT_PLAN.md) is a complete plan for measuring 2N7000
+discrete MOSFETs with two SCPI SMUs (`ivchar measure --backend scpi`). It covers limits, wiring,
+the recipe, sanity checks and record keeping. The recipe has been dry-run on the simulator's
+`discrete` preset. Measured results will be added under `data/measured/` and labeled as measured.
 
 ## Hardware notes
 
