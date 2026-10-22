@@ -9,3 +9,5 @@ output/
 .claude/
 output_finfet/
 output_reliability/
+ci_output/
+ci_reliability/

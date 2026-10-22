@@ -1,5 +1,9 @@
 # ivchar: automated MOSFET/FinFET I-V characterization
 
+[![tests](https://github.com/ymt1001816-cyber/ivchar/actions/workflows/tests.yml/badge.svg)](https://github.com/ymt1001816-cyber/ivchar/actions/workflows/tests.yml)
+![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
 `ivchar` is a Python tool for device characterization work. It drives a source-measure unit through
 an instrument abstraction layer and runs standard Id–Vg / Id–Vd sweeps. It then extracts the usual
 device parameters, runs batch statistics across dies, temperatures and process corners, flags
@@ -7,8 +11,25 @@ outliers and yield loss, and writes an HTML report. You can optionally add an AI
 summary to the report.
 
 > **All example data and figures in this repository are SIMULATED.** They come from the built-in
-> compact-model backend, not from measured silicon. They show what the pipeline does, not results
-> from a real device. Every report and figure produced from simulated data is labeled that way.
+> compact-model backend, or from Cadence Spectre runs on gpdk045 BSIM models, not from measured
+> silicon. They show what the pipeline does, not results from a real device. Every report and
+> figure produced from simulated data is labeled that way.
+
+## Highlights
+
+- **Validated against an industry compact model.** Same sweeps run in Cadence Spectre on gpdk045
+  BSIM4 at 3 corners × 3 temperatures. ivchar tracks corner Vth shifts **within 3 mV**.
+  ([details](#validation-against-bsim-cadence-gpdk045))
+- **Reliability test flow.** BTI measure-stress-measure with recovery, hysteresis and lifetime
+  projection. A **1 s measurement delay changes the projected lifetime 20×** (322 → 16 years),
+  which is why fast sensing matters. ([details](#reliability-bti-and-hysteresis-simulated))
+- **Method findings, not just code.** Constant-current and max-gm Vth differ by 56–86 mV and the
+  gap grows with temperature. Terminal DIBL is 4–6× the BSIM model's own Vth shift. The ZTC
+  bias point sits at 0.69 V. ([details](#findings))
+- **Hardware-ready instrument layer.** Keysight B1500A (FLEX) and SCPI SMU drivers with
+  compliance-aware readings, plus a simulated backend, so everything runs without hardware.
+- **Tested.** 83 pytest tests, including analytic known-answer tests for every extraction method.
+  CI runs on Python 3.10–3.12.
 
 ![Id-Vg across corners](docs/img/idvg_corners.png)
 
